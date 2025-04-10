@@ -1956,6 +1956,13 @@ public abstract class FileStore<C extends Chunk<C>>
                 throw DataUtils.newMVStoreException(
                         DataUtils.ERROR_FILE_CORRUPT, "Position 0");
             }
+
+            // P2 EDIT check the thread local cache
+            Page<K, V> ThreadLocalPage = (Page<K, V>) MVStore.threadLocalCache.get().get(pos);
+            if (ThreadLocalPage != null) {
+                return ThreadLocalPage;
+            }
+
             Page<K,V> page = readPageFromCache(pos);
             if (page == null) {
                 C chunk = getChunk(pos);
@@ -1990,6 +1997,8 @@ public abstract class FileStore<C extends Chunk<C>>
                 }
                 cachePage(page);
             }
+            // P2 EDIT insert into the thread local cache
+            MVStore.threadLocalCache.get().put(pos, page);
             return page;
         } catch (MVStoreException e) {
             if (recoveryMode) {

@@ -27,11 +27,13 @@ import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.BiConsumer;
 import java.util.function.LongConsumer;
 import java.util.function.Predicate;
+
 import org.h2.compress.CompressDeflate;
 import org.h2.compress.CompressLZF;
 import org.h2.compress.Compressor;
 import org.h2.mvstore.type.StringDataType;
 import org.h2.store.fs.FileUtils;
+import org.h2.util.CacheLRU;
 import org.h2.util.Utils;
 
 /*
@@ -185,6 +187,12 @@ public final class MVStore implements AutoCloseable {
 
     private int versionsToKeep = 5;
 
+    /** 
+     * Thread-local cache for frequently accessed pages, one per thread
+     * P2 EDIT
+     */
+    public static final ThreadLocal<Map<Long, Page<?, ?>>> threadLocalCache = ThreadLocal.withInitial(HashMap::new);
+    
     /**
      * The compression level for new pages (0 for disabled, 1 for fast, 2 for
      * high). Even if disabled, the store may contain (old) compressed pages.
