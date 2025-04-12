@@ -5,6 +5,9 @@
  */
 package org.h2.mvstore;
 
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.PrintWriter;
 import java.lang.Thread.UncaughtExceptionHandler;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -188,10 +191,36 @@ public final class MVStore implements AutoCloseable {
     private int versionsToKeep = 5;
 
     /** 
-     * Thread-local cache for frequently accessed pages, one per thread
+     * Thread-local cache and assocaited state for frequently accessed pages, one per thread
      * P2 EDIT
      */
-    public static final ThreadLocal<Map<Long, Page<?, ?>>> threadLocalCache = ThreadLocal.withInitial(HashMap::new);
+    public static final PrintWriter cacheLogWriter;
+
+    static {
+        PrintWriter writer = null;
+        try {
+            writer = new PrintWriter(new FileWriter("thread_local_cache_log.txt", true)); // append mode
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to initialize cache log writer", e);
+        }
+        cacheLogWriter = writer;
+    }
+
+    public static final ThreadLocal<Integer> threadCacheAccesses = ThreadLocal.withInitial(() -> 0);
+
+    public static final ThreadLocal<Integer> threadCacheHits = ThreadLocal.withInitial(() -> 0);
+
+    // public static final ThreadLocal<Map<Long, Page<?, ?>>> threadLocalCache = ThreadLocal.withInitial(HashMap::new);
+
+    public static final ThreadLocal<Map<Long, Page<?, ?>>> threadLocalCache =
+    ThreadLocal.withInitial(() -> {
+        synchronized (cacheLogWriter) {
+            cacheLogWriter.println("Thread " + Thread.currentThread().getId() + " initialized thread-local cache.");
+            cacheLogWriter.flush();
+        }
+        return new HashMap<>();
+    });
+
     
     /**
      * The compression level for new pages (0 for disabled, 1 for fast, 2 for

@@ -1959,8 +1959,21 @@ public abstract class FileStore<C extends Chunk<C>>
 
             // P2 EDIT check the thread local cache
             Page<K, V> ThreadLocalPage = (Page<K, V>) MVStore.threadLocalCache.get().get(pos);
+            MVStore.threadCacheAccesses.set(MVStore.threadCacheAccesses.get() + 1);
             if (ThreadLocalPage != null) {
+                MVStore.threadCacheHits.set(MVStore.threadCacheHits.get() + 1);
                 return ThreadLocalPage;
+            }
+
+            // P2 EDIT Periodically log cache statistics
+            int accesses = MVStore.threadCacheAccesses.get();
+            if (accesses % 1000 == 0) { // Adjust the interval as needed. This is good for more OLTP type workloads.
+                int hits = MVStore.threadCacheHits.get();
+                double hitRate = (double) hits / accesses;
+                synchronized (MVStore.cacheLogWriter) {
+                    MVStore.cacheLogWriter.println("Thread " + Thread.currentThread().getId() + " - Cache Hit Rate: " + hitRate);
+                    MVStore.cacheLogWriter.flush(); // Make sure it writes immediately
+                }
             }
 
             Page<K,V> page = readPageFromCache(pos);
