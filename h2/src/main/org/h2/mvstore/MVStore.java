@@ -15,6 +15,7 @@ import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.Locale;
 import java.util.Map;
@@ -36,7 +37,6 @@ import org.h2.compress.CompressLZF;
 import org.h2.compress.Compressor;
 import org.h2.mvstore.type.StringDataType;
 import org.h2.store.fs.FileUtils;
-import org.h2.util.CacheLRU;
 import org.h2.util.Utils;
 
 /*
@@ -210,7 +210,9 @@ public final class MVStore implements AutoCloseable {
 
     public static final ThreadLocal<Integer> threadCacheHits = ThreadLocal.withInitial(() -> 0);
 
-    // public static final ThreadLocal<Map<Long, Page<?, ?>>> threadLocalCache = ThreadLocal.withInitial(HashMap::new);
+    public static final ThreadLocalCacheMode CACHE_MODE = ThreadLocalCacheMode.FIXED_SIZE;
+
+    public static final int THREAD_LOCAL_CACHE_MAX_SIZE = 128;
 
     public static final ThreadLocal<Map<Long, Page<?, ?>>> threadLocalCache =
     ThreadLocal.withInitial(() -> {
@@ -218,7 +220,19 @@ public final class MVStore implements AutoCloseable {
             cacheLogWriter.println("Thread " + Thread.currentThread().getId() + " initialized thread-local cache.");
             cacheLogWriter.flush();
         }
-        return new HashMap<>();
+        switch (CACHE_MODE) {
+            case UNBOUNDED:
+                return new LinkedHashMap<>(); // grows indefinitely
+            case FIXED_SIZE:
+                return new LinkedHashMap<Long, Page<?, ?>>(THREAD_LOCAL_CACHE_MAX_SIZE, 0.75f, true) {
+                    @Override
+                    protected boolean removeEldestEntry(Map.Entry<Long, Page<?, ?>> eldest) {
+                        return size() > THREAD_LOCAL_CACHE_MAX_SIZE;
+                    }
+                };
+            default:
+                throw new IllegalStateException("Unknown CACHE_MODE: " + CACHE_MODE);
+        }
     });
 
     
