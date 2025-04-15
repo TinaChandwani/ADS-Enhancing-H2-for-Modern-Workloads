@@ -208,8 +208,11 @@ public final class MVStore implements AutoCloseable {
         cacheLogWriter = writer;
     }
 
-    static final int RECENT_PAGES_QUEUE_SIZE = 1000; // Size of recently used pages queue
+    static final int RECENT_PAGES_QUEUE_SIZE = 256; // Size of recently used pages queue
+
     static final Queue<Page<?,?>> recentlyUsedPages = new ConcurrentLinkedDeque<>();
+
+    public static final boolean USE_WARM_CACHE = true;
 
     public static final ThreadLocal<Integer> threadCacheAccesses = ThreadLocal.withInitial(() -> 0);
 
@@ -217,7 +220,7 @@ public final class MVStore implements AutoCloseable {
 
     public static final ThreadLocalCacheMode CACHE_MODE = ThreadLocalCacheMode.FIXED_SIZE;
 
-    public static final int THREAD_LOCAL_CACHE_MAX_SIZE = 128;
+    public static final int THREAD_LOCAL_CACHE_MAX_SIZE = 128; // We can play around with this number
 
     public static final ThreadLocal<Map<Long, Page<?, ?>>> threadLocalCache =
     ThreadLocal.withInitial(() -> {
@@ -243,10 +246,18 @@ public final class MVStore implements AutoCloseable {
         }
         
         // Preload with recently used pages
-        synchronized (recentlyUsedPages) {
-            for (Page<?,?> page : recentlyUsedPages) {
-                if (page != null) {
-                    cache.put(page.getPos(), page);
+        if (USE_WARM_CACHE) {
+            synchronized (recentlyUsedPages) {
+                int i = 0;
+                int maxPreload = THREAD_LOCAL_CACHE_MAX_SIZE / 3;
+                for (Page<?,?> page : recentlyUsedPages) {
+                    if (page != null) {
+                        cache.put(page.getPos(), page);
+                        i++;
+                        if (i >= maxPreload) {
+                            break;
+                        }
+                    }
                 }
             }
         }
