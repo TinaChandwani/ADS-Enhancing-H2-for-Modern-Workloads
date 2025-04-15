@@ -19,9 +19,11 @@ import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -206,6 +208,9 @@ public final class MVStore implements AutoCloseable {
         cacheLogWriter = writer;
     }
 
+    static final int RECENT_PAGES_QUEUE_SIZE = 1000; // Size of recently used pages queue
+    static final Queue<Page<?,?>> recentlyUsedPages = new ConcurrentLinkedDeque<>();
+
     public static final ThreadLocal<Integer> threadCacheAccesses = ThreadLocal.withInitial(() -> 0);
 
     public static final ThreadLocal<Integer> threadCacheHits = ThreadLocal.withInitial(() -> 0);
@@ -220,19 +225,32 @@ public final class MVStore implements AutoCloseable {
             cacheLogWriter.println("Thread " + Thread.currentThread().getId() + " initialized thread-local cache.");
             cacheLogWriter.flush();
         }
+        Map<Long, Page<?,?>> cache;
         switch (CACHE_MODE) {
             case UNBOUNDED:
-                return new LinkedHashMap<>(); // grows indefinitely
+                cache = new LinkedHashMap<>(); // grows indefinitely
+                break;
             case FIXED_SIZE:
-                return new LinkedHashMap<Long, Page<?, ?>>(THREAD_LOCAL_CACHE_MAX_SIZE, 0.75f, true) {
+                cache = new LinkedHashMap<Long, Page<?, ?>>(THREAD_LOCAL_CACHE_MAX_SIZE, 0.75f, true) {
                     @Override
                     protected boolean removeEldestEntry(Map.Entry<Long, Page<?, ?>> eldest) {
                         return size() > THREAD_LOCAL_CACHE_MAX_SIZE;
                     }
                 };
+                break;
             default:
                 throw new IllegalStateException("Unknown CACHE_MODE: " + CACHE_MODE);
         }
+        
+        // Preload with recently used pages
+        synchronized (recentlyUsedPages) {
+            for (Page<?,?> page : recentlyUsedPages) {
+                if (page != null) {
+                    cache.put(page.getPos(), page);
+                }
+            }
+        }
+        return cache;
     });
 
     

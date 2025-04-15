@@ -1650,6 +1650,12 @@ public abstract class FileStore<C extends Chunk<C>>
     void cachePage(Page<?,?> page) {
         if (cache != null) {
             cache.put(page.getPos(), page, page.getMemory());
+            
+            // Add to recently used pages queue
+            MVStore.recentlyUsedPages.offer(page);
+            while (MVStore.recentlyUsedPages.size() > MVStore.RECENT_PAGES_QUEUE_SIZE) {
+                MVStore.recentlyUsedPages.poll(); // Remove oldest if queue is too large
+            }
         }
     }
 
