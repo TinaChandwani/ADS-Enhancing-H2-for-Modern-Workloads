@@ -208,11 +208,13 @@ public final class MVStore implements AutoCloseable {
         cacheLogWriter = writer;
     }
 
-    static final int RECENT_PAGES_QUEUE_SIZE = 256; // Size of recently used pages queue
+    public static final int THREAD_LOCAL_CACHE_MAX_SIZE = 128; // We can play around with this number
+
+    static final int RECENT_PAGES_QUEUE_SIZE = THREAD_LOCAL_CACHE_MAX_SIZE * 2; // Size of recently used pages queue
 
     static final Queue<Page<?,?>> recentlyUsedPages = new ConcurrentLinkedDeque<>();
 
-    public static final boolean USE_WARM_CACHE = true;
+    public static final boolean USE_WARM_CACHE = false;
 
     public static final ThreadLocal<Integer> threadCacheAccesses = ThreadLocal.withInitial(() -> 0);
 
@@ -220,7 +222,9 @@ public final class MVStore implements AutoCloseable {
 
     public static final ThreadLocalCacheMode CACHE_MODE = ThreadLocalCacheMode.FIXED_SIZE;
 
-    public static final int THREAD_LOCAL_CACHE_MAX_SIZE = 128; // We can play around with this number
+    public static final int ADAPTIVE_CACHE_MIN_SIZE = THREAD_LOCAL_CACHE_MAX_SIZE / 2;
+    public static final int ADAPTIVE_CACHE_MAX_SIZE = THREAD_LOCAL_CACHE_MAX_SIZE * 2;
+    public static final int ADAPTIVE_CACHE_INITIAL_SIZE = THREAD_LOCAL_CACHE_MAX_SIZE * 3 / 4;
 
     public static final ThreadLocal<Map<Long, Page<?, ?>>> threadLocalCache =
     ThreadLocal.withInitial(() -> {
@@ -230,16 +234,19 @@ public final class MVStore implements AutoCloseable {
         }
         Map<Long, Page<?,?>> cache;
         switch (CACHE_MODE) {
-            case UNBOUNDED:
+            case UNBOUNDED: 
                 cache = new LinkedHashMap<>(); // grows indefinitely
                 break;
-            case FIXED_SIZE:
+            case FIXED_SIZE: // Can hold up to THREAD_LOCAL_CACHE_MAX_SIZE pages
                 cache = new LinkedHashMap<Long, Page<?, ?>>(THREAD_LOCAL_CACHE_MAX_SIZE, 0.75f, true) {
                     @Override
                     protected boolean removeEldestEntry(Map.Entry<Long, Page<?, ?>> eldest) {
                         return size() > THREAD_LOCAL_CACHE_MAX_SIZE;
                     }
                 };
+                break;
+            case ADAPTIVE: // Starts with THREAD_LOCAL_CACHE_MAX_SIZE / 2. Can go down to 16 or up to 256 pages
+                cache = new AdaptiveLRUCache<>(ADAPTIVE_CACHE_INITIAL_SIZE);
                 break;
             default:
                 throw new IllegalStateException("Unknown CACHE_MODE: " + CACHE_MODE);

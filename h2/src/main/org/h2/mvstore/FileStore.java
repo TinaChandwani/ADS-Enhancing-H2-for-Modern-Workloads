@@ -1977,12 +1977,26 @@ public abstract class FileStore<C extends Chunk<C>>
 
             // P2 EDIT Periodically log cache statistics
             int accesses = MVStore.threadCacheAccesses.get();
-            if (accesses % 1000 == 0) { // Adjust the interval as needed. This is good for more OLTP type workloads.
+            if (accesses % 1000 == 0) { // Adjust the interval as needed
                 int hits = MVStore.threadCacheHits.get();
                 double hitRate = (double) hits / accesses;
                 synchronized (MVStore.cacheLogWriter) {
                     MVStore.cacheLogWriter.println("Thread " + Thread.currentThread().getId() + " - Cache Hit Rate: " + hitRate);
                     MVStore.cacheLogWriter.flush(); // Make sure it writes immediately
+                }
+
+                if (MVStore.CACHE_MODE == ThreadLocalCacheMode.ADAPTIVE) {
+                    AdaptiveLRUCache<Long, Page<?, ?>> adaptive = (AdaptiveLRUCache<Long, Page<?, ?>>) MVStore.threadLocalCache.get();
+
+                    int currentSize = adaptive.getMaxSize();
+                    if (hitRate > 0.8 && currentSize < MVStore.ADAPTIVE_CACHE_MAX_SIZE) {
+                        adaptive.setMaxSize(currentSize + 16); // Grow gradually
+                    } else if (hitRate < 0.2 && currentSize > MVStore.ADAPTIVE_CACHE_MIN_SIZE) {
+                        adaptive.setMaxSize(currentSize - 16); // Shrink cautiously
+                    }
+                    // Must reset counters for adaptive caches because they're actually used to determine cache size
+                    MVStore.threadCacheAccesses.set(0);
+                    MVStore.threadCacheHits.set(0);
                 }
             }
 
