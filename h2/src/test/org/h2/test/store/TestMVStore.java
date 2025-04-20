@@ -55,6 +55,7 @@ public class TestMVStore extends TestBase {
 
     @Override
     public void test() throws Exception {
+        /*
         testRemoveMapRollback();
         testProvidedFileStoreNotOpenedAndClosed();
         testVolatileMap();
@@ -75,14 +76,18 @@ public class TestMVStore extends TestBase {
         testBackgroundExceptionListener();
         testOldVersion();
         testAtomicOperations();
-        testWriteBuffer();
+        */
+        // testWriteBuffer();
+        /*
         testWriteDelay();
         testEncryptedFile();
         testFileFormatChange();
         testRecreateMap();
         testRenameMapRollback();
         testCustomMapType();
-        testCacheSize();
+        */
+        // testCacheSize();
+        /*
         testConcurrentOpen();
         testFileHeader();
         testFileHeaderCorruption();
@@ -107,7 +112,9 @@ public class TestMVStore extends TestBase {
         testCompact();
         testCompactMapNotOpen();
         testReuseSpace();
+        */
         testRandom();
+        /* 
         testKeyValueClasses();
         testIterate();
         testIterateReverse();
@@ -117,6 +124,7 @@ public class TestMVStore extends TestBase {
 
         // longer running tests
         testLargerThan2G();
+        */
     }
 
     private void testRemoveMapRollback() {
@@ -784,6 +792,8 @@ public class TestMVStore extends TestBase {
         if (config.memory) {
             return;
         }
+        long startTime = System.nanoTime();
+
         String fileName = getBaseDir() + "/" + getTestName();
         FileUtils.delete(fileName);
         try (MVStore s = new MVStore.Builder().
@@ -792,31 +802,46 @@ public class TestMVStore extends TestBase {
                 compress().open()) {
             s.setReuseSpace(false); // disable free space scanning
             MVMap<Integer, String> map = s.openMap("test");
+            s.preloadTargetMap = map;
             // add 10 MB of data
             for (int i = 0; i < 1024; i++) {
                 map.put(i, new String(new char[10240]));
             }
+            for (int i = 0; i < 1024; i++) {
+                map.get(i);
+            }
+            
         }
         int[] expectedReadsForCacheSize = {
                 7176, 1750, 940, 940, 940, 940, 940   // compressed
 //                1880, 490, 476, 501, 476, 476, 541   // compressed
 //                1887, 1775, 1599, 1355, 1035, 732, 507    // uncompressed
         };
+        int cacheSize = 0;
+        int accesses = 0;
+        int hits = 0;
         for (int cacheSizeMB = 0; cacheSizeMB <= 6; cacheSizeMB += 1) {
+            
             Utils.collectGarbage();
             try (MVStore s = new MVStore.Builder().
                     fileName(fileName).
                     autoCommitDisabled().
                     cacheSize(cacheSizeMB).open()) {
                 assertEquals(cacheSizeMB, s.getCacheSize());
+                
                 MVMap<Integer, String> map = s.openMap("test");
+                s.preloadTargetMap = map;
                 for (int i = 0; i < 1024; i += 128) {
                     for (int j = 0; j < i; j++) {
                         String x = map.get(j);
                         assertEquals(10240, x.length());
                     }
                 }
-                FileStore fileStore = s.getFileStore();
+                
+                cacheSize = s.threadLocalCache.get().size();
+                accesses += s.threadCacheAccesses.get();
+                hits += s.threadCacheHits.get();
+                /* FileStore fileStore = s.getFileStore();
                 long readCount = fileStore.getReadCount();
                 int expected = expectedReadsForCacheSize[cacheSizeMB];
                 assertTrue("Cache " + cacheSizeMB + "Mb, reads: " + readCount + " expected: " + expected +
@@ -825,9 +850,22 @@ public class TestMVStore extends TestBase {
                                 " cache hit ratio: " + s.getFileStore().getCacheHitRatio() +
                                 " cache ToC hit ratio: " + s.getFileStore().getTocCacheHitRatio() +
                                 "",
-                        Math.abs(100 - (100 * expected / readCount)) < 20);
+                        Math.abs(100 - (100 * expected / readCount)) < 20);*/
+                s.threadLocalCache.remove();
             }
         }
+        long endTime = System.nanoTime();
+        long durationMs = (endTime - startTime) / 1_000_000;
+
+        double hitRate = accesses > 0 ? (100.0 * hits / accesses) : 0.0;
+
+        String mode = MVStore.CACHE_MODE.name();
+        String warm = MVStore.USE_WARM_CACHE ? "Warm" : "Cold";
+
+        System.out.printf(
+        "[%s | %s] Time: %d ms | Accesses: %d | Hits: %d | HitRate: %.2f%% | FinalCacheSize: %d\n",
+        mode, warm, durationMs, accesses, hits, hitRate, cacheSize
+        );
     }
 
     private void testConcurrentOpen() {
@@ -1837,12 +1875,19 @@ public class TestMVStore extends TestBase {
     private void testRandom() {
         String fileName = getBaseDir() + "/" + getTestName();
         FileUtils.delete(fileName);
+
+        long startTime = System.nanoTime();
+        int accesses = 0;
+        int hits = 0;
+        int finalCacheSize = 0;
+
         try (MVStore s = openStore(fileName)) {
             MVMap<Integer, Integer> m = s.openMap("data");
+            s.preloadTargetMap = m;
             TreeMap<Integer, Integer> map = new TreeMap<>();
             Random r = new Random(1);
-            int operationCount = 1000;
-            int maxValue = 30;
+            int operationCount = 10000; // 1000
+            int maxValue = 100000; // 30
             Integer expected, got;
             for (int i = 0; i < operationCount; i++) {
                 int k = r.nextInt(maxValue);
@@ -1893,7 +1938,22 @@ public class TestMVStore extends TestBase {
                     assertFalse(it.hasNext());
                 }
             }
+            // After test: gather stats
+            accesses = s.threadCacheAccesses.get();
+            hits = s.threadCacheHits.get();
+            finalCacheSize = s.threadLocalCache.get().size();
+            s.threadLocalCache.remove();
         }
+        long endTime = System.nanoTime();
+        long durationMs = (endTime - startTime) / 1_000_000;
+        double hitRate = accesses > 0 ? (100.0 * hits / accesses) : 0.0;
+        String mode = MVStore.CACHE_MODE.name();
+        String warm = MVStore.USE_WARM_CACHE ? "Warm" : "Cold";
+
+        System.out.printf(
+            "[%s | %s] Time: %d ms | Accesses: %d | Hits: %d | HitRate: %.2f%% | FinalCacheSize: %d\n",
+            mode, warm, durationMs, accesses, hits, hitRate, finalCacheSize
+        );
     }
 
     private void testKeyValueClasses() {

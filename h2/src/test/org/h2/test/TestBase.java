@@ -197,7 +197,8 @@ public abstract class TestBase {
      * @return the directory, possibly including file system prefix
      */
     public String getBaseDir() {
-        String dir = baseDir;
+        return "tmp/test";
+        /*String dir = baseDir;
         if (config != null) {
             if (config.reopen) {
                 dir = "rec:memFS:" + dir;
@@ -207,7 +208,7 @@ public abstract class TestBase {
             }
         }
         // return "split:nioMapped:" + baseDir;
-        return dir;
+        return dir;*/
     }
 
 

@@ -1651,12 +1651,14 @@ public abstract class FileStore<C extends Chunk<C>>
         if (cache != null) {
             cache.put(page.getPos(), page, page.getMemory());
             
-            // Add to recently used pages queue
-            if (MVStore.USE_WARM_CACHE) {
-                synchronized (MVStore.recentlyUsedPages) {
-                    MVStore.recentlyUsedPages.offer(page);
-                    while (MVStore.recentlyUsedPages.size() > MVStore.RECENT_PAGES_QUEUE_SIZE) {
-                        MVStore.recentlyUsedPages.poll(); // Remove oldest if queue is too large
+            // P2 EDIT Add to recently used pages queue
+            if (MVStore.USE_THREAD_LOCAL_CACHE) {   
+                if (MVStore.USE_WARM_CACHE) {
+                    synchronized (MVStore.recentlyUsedPages) {
+                        MVStore.recentlyUsedPages.offer(page.getPos());
+                        while (MVStore.recentlyUsedPages.size() > MVStore.RECENT_PAGES_QUEUE_SIZE) {
+                            MVStore.recentlyUsedPages.poll(); // Remove oldest if queue is too large
+                        }
                     }
                 }
             }
@@ -1961,42 +1963,68 @@ public abstract class FileStore<C extends Chunk<C>>
      * @return the page
      */
     <K,V> Page<K,V> readPage(MVMap<K,V> map, long pos) {
+        System.out.println("readPage called");
+        if (MVStore.USE_WARM_CACHE &&
+            mvStore.preloadTargetMap != null &&
+            !mvStore.preloadPerformed.get()) {
+            mvStore.performPreload();
+            mvStore.preloadPerformed.set(true);
+        }
+
         try {
             if (!DataUtils.isPageSaved(pos)) {
                 throw DataUtils.newMVStoreException(
                         DataUtils.ERROR_FILE_CORRUPT, "Position 0");
             }
 
-            // P2 EDIT check the thread local cache
-            Page<K, V> ThreadLocalPage = (Page<K, V>) MVStore.threadLocalCache.get().get(pos);
-            MVStore.threadCacheAccesses.set(MVStore.threadCacheAccesses.get() + 1);
-            if (ThreadLocalPage != null) {
-                MVStore.threadCacheHits.set(MVStore.threadCacheHits.get() + 1);
-                return ThreadLocalPage;
-            }
+            // P2 EDIT use thread local cache
+            if (MVStore.USE_THREAD_LOCAL_CACHE) {
 
-            // P2 EDIT Periodically log cache statistics
-            int accesses = MVStore.threadCacheAccesses.get();
-            if (accesses % 1000 == 0) { // Adjust the interval as needed
-                int hits = MVStore.threadCacheHits.get();
-                double hitRate = (double) hits / accesses;
-                synchronized (MVStore.cacheLogWriter) {
-                    MVStore.cacheLogWriter.println("Thread " + Thread.currentThread().getId() + " - Cache Hit Rate: " + hitRate);
-                    MVStore.cacheLogWriter.flush(); // Make sure it writes immediately
+                // P2 EDIT check the thread local cache
+                Page<K, V> ThreadLocalPage = (Page<K, V>) mvStore.threadLocalCache.get().get(pos);
+                mvStore.threadCacheAccesses.set(mvStore.threadCacheAccesses.get() + 1);
+                mvStore.adaptiveCacheAccesses.set(mvStore.adaptiveCacheAccesses.get() + 1);
+                if (ThreadLocalPage != null) {
+                    mvStore.threadCacheHits.set(mvStore.threadCacheHits.get() + 1);
+                    mvStore.adaptiveCacheHits.set(mvStore.adaptiveCacheHits.get() + 1);
+                    return ThreadLocalPage;
                 }
 
-                if (MVStore.CACHE_MODE == ThreadLocalCacheMode.ADAPTIVE) {
-                    AdaptiveLRUCache<Long, Page<?, ?>> adaptive = (AdaptiveLRUCache<Long, Page<?, ?>>) MVStore.threadLocalCache.get();
-
-                    int currentSize = adaptive.getMaxSize();
-                    if (hitRate > 0.8 && currentSize < MVStore.ADAPTIVE_CACHE_MAX_SIZE) {
-                        adaptive.setMaxSize(currentSize + 16); // Grow gradually
-                    } else if (hitRate < 0.2 && currentSize > MVStore.ADAPTIVE_CACHE_MIN_SIZE) {
-                        adaptive.setMaxSize(currentSize - 16); // Shrink cautiously
+                // P2 EDIT Periodically log cache statistics
+                int accesses = mvStore.threadCacheAccesses.get();
+                if (accesses % 512 == 0) { // Adjust the interval as needed
+                    int hits = mvStore.threadCacheHits.get();
+                    double hitRate = (double) hits / accesses;
+                    synchronized (MVStore.cacheLogWriter) {
+                        // MVStore.cacheLogWriter.println("Thread " + Thread.currentThread().getId() + " - Cache Accesses: " + accesses);
+                        // MVStore.cacheLogWriter.println("Thread " + Thread.currentThread().getId() + " - Cache Hits: " + hits);
+                        // MVStore.cacheLogWriter.println("Thread " + Thread.currentThread().getId() + " - Cache Hit Rate: " + hitRate);
+                        MVStore.cacheLogWriter.println("Thread " + Thread.currentThread().getId() + " - Cache Size: " + mvStore.threadLocalCache.get().size());
+                        MVStore.cacheLogWriter.flush(); // Make sure it writes immediately
                     }
-                    // Must reset counters for adaptive caches because they're actually used to determine cache size
-                    MVStore.threadCacheAccesses.set(0);
-                    MVStore.threadCacheHits.set(0);
+
+                    if (MVStore.CACHE_MODE == ThreadLocalCacheMode.ADAPTIVE) {
+                        AdaptiveLRUCache<Long, Page<?, ?>> adaptive = (AdaptiveLRUCache<Long, Page<?, ?>>) mvStore.threadLocalCache.get();
+
+                        int currentSize = adaptive.getMaxSize();
+                        hitRate = (double) mvStore.adaptiveCacheHits.get() / mvStore.adaptiveCacheAccesses.get();
+                        if (hitRate > 0.8 && currentSize < MVStore.ADAPTIVE_CACHE_MAX_SIZE) {
+                            adaptive.setMaxSize(currentSize + 16); // Grow gradually
+                            synchronized (MVStore.cacheLogWriter) {
+                                MVStore.cacheLogWriter.println("Thread " + Thread.currentThread().getId() + " - Cache Grew");
+                                MVStore.cacheLogWriter.flush();
+                            }
+                        } else if (hitRate < 0.2 && currentSize > MVStore.ADAPTIVE_CACHE_MIN_SIZE) {
+                            adaptive.setMaxSize(currentSize - 16); // Shrink cautiously
+                            synchronized (MVStore.cacheLogWriter) {
+                                MVStore.cacheLogWriter.println("Thread " + Thread.currentThread().getId() + " - Cache Shrunk");
+                                MVStore.cacheLogWriter.flush();
+                            }
+                        }
+                        // Must reset counters for adaptive caches because they're actually used to determine cache size
+                        mvStore.adaptiveCacheAccesses.set(0);
+                        mvStore.adaptiveCacheHits.set(0);
+                    }
                 }
             }
 
@@ -2035,7 +2063,59 @@ public abstract class FileStore<C extends Chunk<C>>
                 cachePage(page);
             }
             // P2 EDIT insert into the thread local cache
-            MVStore.threadLocalCache.get().put(pos, page);
+            if (MVStore.USE_THREAD_LOCAL_CACHE) {
+                mvStore.threadLocalCache.get().put(pos, page);
+            }
+            return page;
+        } catch (MVStoreException e) {
+            if (recoveryMode) {
+                return map.createEmptyLeaf();
+            }
+            throw e;
+        }
+    }
+
+    <K,V> Page<K,V> readForPreload(MVMap<K,V> map, long pos) {
+        try {
+            if (!DataUtils.isPageSaved(pos)) {
+                throw DataUtils.newMVStoreException(
+                        DataUtils.ERROR_FILE_CORRUPT, "Position 0");
+            }
+
+            Page<K,V> page = readPageFromCache(pos);
+            if (page == null) {
+                C chunk = getChunk(pos);
+                int pageOffset = DataUtils.getPageOffset(pos);
+                while(true) {
+                    MVStoreException exception = null;
+                    ByteBuffer buff = chunk.buffer;
+                    boolean alreadySaved = buff == null;
+                    if (alreadySaved) {
+                        buff = chunk.readBufferForPage(this, pageOffset, pos);
+                    } else {
+//                        System.err.println("Using unsaved buffer " + chunk.id + "/" + pageOffset);
+                        buff = buff.duplicate();
+                        buff.position(pageOffset);
+                        buff = buff.slice();
+                    }
+                    try {
+                        page = Page.read(buff, pos, map);
+                    } catch (MVStoreException e) {
+                        exception = e;
+                    } catch (Exception e) {
+                        exception = DataUtils.newMVStoreException(DataUtils.ERROR_FILE_CORRUPT,
+                                "Unable to read the page at position 0x{0}, chunk {1}, offset 0x{3}",
+                                Long.toHexString(pos), chunk, Long.toHexString(pageOffset), e);
+                    }
+                    if (alreadySaved) {
+                        if (exception == null) {
+                            break;
+                        }
+                        throw exception;
+                    }
+                }
+                cachePage(page);
+            }
             return page;
         } catch (MVStoreException e) {
             if (recoveryMode) {
