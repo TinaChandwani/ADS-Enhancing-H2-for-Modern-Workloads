@@ -224,7 +224,7 @@ public final class MVStore implements AutoCloseable {
     public final ThreadLocal<Integer> adaptiveCacheAccesses = ThreadLocal.withInitial(() -> 0);
     public final ThreadLocal<Integer> adaptiveCacheHits = ThreadLocal.withInitial(() -> 0);
 
-    public static final ThreadLocalCacheMode CACHE_MODE = ThreadLocalCacheMode.FIXED_SIZE;
+    public static final ThreadLocalCacheMode CACHE_MODE = ThreadLocalCacheMode.ADAPTIVE;
 
     public static final int ADAPTIVE_CACHE_MIN_SIZE = THREAD_LOCAL_CACHE_MAX_SIZE / 2;
     public static final int ADAPTIVE_CACHE_MAX_SIZE = THREAD_LOCAL_CACHE_MAX_SIZE * 2;

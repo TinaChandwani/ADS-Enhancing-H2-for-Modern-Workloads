@@ -8,12 +8,17 @@ package org.h2.test.store;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.NoSuchElementException;
 import java.util.Random;
 import java.util.TreeMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -112,8 +117,11 @@ public class TestMVStore extends TestBase {
         testCompact();
         testCompactMapNotOpen();
         testReuseSpace();
-        */
         testRandom();
+        */
+        // testMixedWorkload();
+        // testMultiThreadedRead();
+        testAdaptiveScaling();
         /* 
         testKeyValueClasses();
         testIterate();
@@ -1955,6 +1963,234 @@ public class TestMVStore extends TestBase {
             mode, warm, durationMs, accesses, hits, hitRate, finalCacheSize
         );
     }
+
+    /*private void testMixedWorkload() {
+        String fileName = getBaseDir() + "/" + getTestName();
+        FileUtils.delete(fileName);
+    
+        long startTime = System.nanoTime();
+        int accesses = 0;
+        int hits = 0;
+        int finalCacheSize = 0;
+    
+        try (MVStore s = openStore(fileName)) {
+            MVMap<Integer, String> map = s.openMap("data");
+            s.preloadTargetMap = map;
+    
+            Random rand = new Random(42);
+            int totalOps = 20000;
+            int maxKey = 3000;
+    
+            for (int i = 0; i < totalOps; i++) {
+                int key = rand.nextInt(maxKey);
+                int op = rand.nextInt(100);
+                if (op < 60) { // 60% reads
+                    String value = map.get(key);
+                    if (value == null && rand.nextBoolean()) {
+                        map.put(key, "init" + key); // occasionally initialize if null
+                    }
+                } else if (op < 90) { // 30% writes
+                    map.put(key, "val" + rand.nextInt());
+                } else { // 10% deletes
+                    map.remove(key);
+                }
+            }
+    
+            accesses = s.threadCacheAccesses.get();
+            hits = s.threadCacheHits.get();
+            finalCacheSize = s.threadLocalCache.get().size();
+            s.threadLocalCache.remove();
+        }
+    
+        long endTime = System.nanoTime();
+        long durationMs = (endTime - startTime) / 1_000_000;
+        double hitRate = accesses > 0 ? (100.0 * hits / accesses) : 0.0;
+        String mode = MVStore.CACHE_MODE.name();
+        String warm = MVStore.USE_WARM_CACHE ? "Warm" : "Cold";
+    
+        System.out.printf(
+            "[%s | %s] Time: %d ms | Accesses: %d | Hits: %d | HitRate: %.2f%% | FinalCacheSize: %d\n",
+            mode, warm, durationMs, accesses, hits, hitRate, finalCacheSize
+        );
+    }*/
+
+    private void testMixedWorkload() {
+        String fileName = getBaseDir() + "/" + getTestName();
+        FileUtils.delete(fileName);
+    
+        // ----------- Phase 1: Write -----------
+        try (MVStore s = openStore(fileName)) {
+            MVMap<Integer, String> map = s.openMap("data");
+            Random rand = new Random(42);
+            for (int i = 0; i < 15000; i++) {
+                int key = rand.nextInt(3000);
+                map.put(key, "val" + rand.nextInt());
+            }
+            s.commit();
+        }
+    
+        // ----------- Phase 2: Read & mutate -----------
+        long startTime = System.nanoTime();
+        int accesses = 0;
+        int hits = 0;
+        int finalCacheSize = 0;
+    
+        try (MVStore s = openStore(fileName)) {
+            MVMap<Integer, String> map = s.openMap("data");
+            s.preloadTargetMap = map;
+    
+            Random rand = new Random(123);
+            for (int i = 0; i < 5000; i++) {
+                int key = rand.nextInt(3000);
+                if (rand.nextInt(100) < 80) { // mostly reads
+                    map.get(key);
+                } else if (rand.nextInt(10) < 8) {
+                    map.put(key, "update" + rand.nextInt());
+                } else {
+                    map.remove(key);
+                }
+            }
+    
+            accesses = s.threadCacheAccesses.get();
+            hits = s.threadCacheHits.get();
+            finalCacheSize = s.threadLocalCache.get().size();
+            s.threadLocalCache.remove();
+        }
+    
+        long endTime = System.nanoTime();
+        long durationMs = (endTime - startTime) / 1_000_000;
+        double hitRate = accesses > 0 ? (100.0 * hits / accesses) : 0.0;
+        String mode = MVStore.CACHE_MODE.name();
+        String warm = MVStore.USE_WARM_CACHE ? "Warm" : "Cold";
+    
+        System.out.printf(
+            "[%s | %s] Time: %d ms | Accesses: %d | Hits: %d | HitRate: %.2f%% | FinalCacheSize: %d\n",
+            mode, warm, durationMs, accesses, hits, hitRate, finalCacheSize
+        );
+    }
+
+    private void testMultiThreadedRead() {
+        String fileName = getBaseDir() + "/" + getTestName();
+        FileUtils.delete(fileName);
+    
+        // -------- Phase 1: Write some data --------
+        MVStore s = openStore(fileName);
+        MVMap<Integer, String> sharedMap = s.openMap("data");
+    
+        for (int i = 0; i < 10000; i++) {
+            sharedMap.put(i, "value" + i);
+        }
+        s.commit();
+        s.preloadTargetMap = sharedMap;
+
+        // -------- Phase 2: Multithreaded reads --------
+        final int threadCount = 4;
+        final int readsPerThread = 5000;
+        ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+        List<Future<String>> results = new ArrayList<>();
+    
+        long startTime = System.nanoTime();
+    
+        for (int t = 0; t < threadCount; t++) {
+            results.add(executor.submit(() -> {
+                Random rand = new Random();
+                for (int i = 0; i < readsPerThread; i++) {
+                    int key = rand.nextInt(10000);
+                    sharedMap.get(key);
+                }
+    
+                int accesses = s.threadCacheAccesses.get();
+                int hits = s.threadCacheHits.get();
+                int size = s.threadLocalCache.get().size();
+                s.threadLocalCache.remove();
+    
+                double hitRate = accesses > 0 ? (100.0 * hits / accesses) : 0.0;
+                String mode = MVStore.CACHE_MODE.name();
+                String warm = MVStore.USE_WARM_CACHE ? "Warm" : "Cold";
+                long threadId = Thread.currentThread().getId();
+    
+                return String.format(
+                    "[Thread %d | %s | %s] Accesses: %d | Hits: %d | HitRate: %.2f%% | FinalCacheSize: %d",
+                    threadId, mode, warm, accesses, hits, hitRate, size
+                );
+            }));
+        }
+    
+        executor.shutdown();
+        try {
+            executor.awaitTermination(10, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+    
+        long endTime = System.nanoTime();
+        long durationMs = (endTime - startTime) / 1_000_000;
+    
+        System.out.println("\n=== Multithreaded Read Test Results ===");
+        for (Future<String> result : results) {
+            try {
+                System.out.println(result.get());
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+    
+        System.out.printf("Total time: %d ms\n", durationMs);
+        s.close();
+    }
+    
+    private void testAdaptiveScaling() {
+        String fileName = getBaseDir() + "/" + getTestName();
+        FileUtils.delete(fileName);
+    
+        // Create the store and load it with pages
+        try (MVStore s = new MVStore.Builder().
+                fileName(fileName).
+                autoCommitDisabled().
+                compress().open()) {
+            MVMap<Integer, String> map = s.openMap("adaptive");
+            for (int i = 0; i < 5000; i++) {
+                map.put(i, new String(new char[1024])); // 1KB values
+            }
+            s.commit();
+        }
+    
+        // Reopen and repeatedly read patterns of varying sizes
+        try (MVStore s = new MVStore.Builder().
+                fileName(fileName).
+                autoCommitDisabled().
+                compress().cacheSize(16).open()) {
+            s.setReuseSpace(false);
+            MVMap<Integer, String> map = s.openMap("adaptive");
+            long start = System.nanoTime();
+    
+            // Simulate fluctuating access patterns
+            for (int round = 0; round < 50; round++) {
+                for (int i = 0; i < 2000; i++) {
+                    map.get((i + round * 37) % 5000); // some shifting access pattern
+                }
+                // simulate idle to force change over time
+                try {
+                    Thread.sleep(10);
+                } catch (InterruptedException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+    
+            long end = System.nanoTime();
+            int finalSize = s.threadLocalCache.get().size();
+            int accesses = s.threadCacheAccesses.get();
+            int hits = s.threadCacheHits.get();
+            double hitRate = accesses > 0 ? (100.0 * hits / accesses) : 0.0;
+            long durationMs = (end - start) / 1_000_000;
+    
+            System.out.printf("[ADAPTIVE SCALING] Time: %d ms | Accesses: %d | Hits: %d | HitRate: %.2f%% | FinalCacheSize: %d\n",
+                    durationMs, accesses, hits, hitRate, finalSize);
+        }
+    }
+        
+    
+    
 
     private void testKeyValueClasses() {
         String fileName = getBaseDir() + "/" + getTestName();

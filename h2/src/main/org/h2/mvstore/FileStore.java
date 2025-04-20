@@ -1963,7 +1963,7 @@ public abstract class FileStore<C extends Chunk<C>>
      * @return the page
      */
     <K,V> Page<K,V> readPage(MVMap<K,V> map, long pos) {
-        System.out.println("readPage called");
+        // System.out.println("readPage called");
         if (MVStore.USE_WARM_CACHE &&
             mvStore.preloadTargetMap != null &&
             !mvStore.preloadPerformed.get()) {
