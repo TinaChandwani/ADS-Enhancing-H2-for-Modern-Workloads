@@ -1964,7 +1964,7 @@ public abstract class FileStore<C extends Chunk<C>>
      */
     <K,V> Page<K,V> readPage(MVMap<K,V> map, long pos) {
         // System.out.println("readPage called");
-        if (MVStore.USE_WARM_CACHE &&
+        if (MVStore.USE_THREAD_LOCAL_CACHE && MVStore.USE_WARM_CACHE &&
             mvStore.preloadTargetMap != null &&
             !mvStore.preloadPerformed.get()) {
             mvStore.performPreload();
@@ -1987,7 +1987,6 @@ public abstract class FileStore<C extends Chunk<C>>
                 if (ThreadLocalPage != null) {
                     mvStore.threadCacheHits.set(mvStore.threadCacheHits.get() + 1);
                     mvStore.adaptiveCacheHits.set(mvStore.adaptiveCacheHits.get() + 1);
-                    return ThreadLocalPage;
                 }
 
                 // P2 EDIT Periodically log cache statistics
@@ -1999,8 +1998,8 @@ public abstract class FileStore<C extends Chunk<C>>
                         // MVStore.cacheLogWriter.println("Thread " + Thread.currentThread().getId() + " - Cache Accesses: " + accesses);
                         // MVStore.cacheLogWriter.println("Thread " + Thread.currentThread().getId() + " - Cache Hits: " + hits);
                         // MVStore.cacheLogWriter.println("Thread " + Thread.currentThread().getId() + " - Cache Hit Rate: " + hitRate);
-                        MVStore.cacheLogWriter.println("Thread " + Thread.currentThread().getId() + " - Cache Size: " + mvStore.threadLocalCache.get().size());
-                        MVStore.cacheLogWriter.flush(); // Make sure it writes immediately
+                        // MVStore.cacheLogWriter.println("Thread " + Thread.currentThread().getId() + " - Cache Size: " + mvStore.threadLocalCache.get().size());
+                        // MVStore.cacheLogWriter.flush(); // Make sure it writes immediately
                     }
 
                     if (MVStore.CACHE_MODE == ThreadLocalCacheMode.ADAPTIVE) {
@@ -2011,7 +2010,12 @@ public abstract class FileStore<C extends Chunk<C>>
                         if (hitRate > 0.8 && currentSize < MVStore.ADAPTIVE_CACHE_MAX_SIZE) {
                             adaptive.setMaxSize(currentSize + 16); // Grow gradually
                             synchronized (MVStore.cacheLogWriter) {
-                                MVStore.cacheLogWriter.println("Thread " + Thread.currentThread().getId() + " - Cache Grew");
+                                MVStore.cacheLogWriter.printf(
+                                    "Thread %d - Cache grew to %d (hitRate: %.2f%%)\n",
+                                    Thread.currentThread().getId(),
+                                    adaptive.getMaxSize(),
+                                    hitRate * 100
+                                );
                                 MVStore.cacheLogWriter.flush();
                             }
                         } else if (hitRate < 0.2 && currentSize > MVStore.ADAPTIVE_CACHE_MIN_SIZE) {
@@ -2025,6 +2029,9 @@ public abstract class FileStore<C extends Chunk<C>>
                         mvStore.adaptiveCacheAccesses.set(0);
                         mvStore.adaptiveCacheHits.set(0);
                     }
+                }
+                if (ThreadLocalPage != null) {
+                    return ThreadLocalPage;
                 }
             }
 

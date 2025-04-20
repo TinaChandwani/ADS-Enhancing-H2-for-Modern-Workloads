@@ -122,6 +122,8 @@ public class TestMVStore extends TestBase {
         // testMixedWorkload();
         // testMultiThreadedRead();
         testAdaptiveScaling();
+        // testAdaptiveScalingGrowThenShrink();
+        // testAdaptiveShrinking();
         /* 
         testKeyValueClasses();
         testIterate();
@@ -2188,9 +2190,142 @@ public class TestMVStore extends TestBase {
                     durationMs, accesses, hits, hitRate, finalSize);
         }
     }
-        
+
+    private void testAdaptiveScalingGrowThenShrink() {
+        String fileName = getBaseDir() + "/" + getTestName();
+        FileUtils.delete(fileName);
     
+        // Step 1: Create a store with 5000 large entries (1KB strings)
+        try (MVStore s = new MVStore.Builder()
+                .fileName(fileName)
+                .autoCommitDisabled()
+                .compress().open()) {
+            MVMap<Integer, String> map = s.openMap("adaptive");
+            for (int i = 0; i < 5000; i++) {
+                map.put(i, new String(new char[1024])); // 1KB per value
+            }
+            s.commit();
+        }
     
+        // Step 2: GROW phase (frequent re-use of small working set)
+        int growAccesses = 0;
+        int growHits = 0;
+        int growFinalSize = 0;
+        long growStart = System.nanoTime();
+    
+        try (MVStore s = new MVStore.Builder()
+                .fileName(fileName)
+                .autoCommitDisabled()
+                .compress().cacheSize(16).open()) {
+            s.setReuseSpace(false);
+            MVMap<Integer, String> map = s.openMap("adaptive");
+    
+            for (int round = 0; round < 50; round++) {
+                for (int i = 0; i < 2000; i++) {
+                    map.get((i + round * 37) % 200);  // hot set
+                }
+                Thread.sleep(10);
+            }
+    
+            growAccesses = s.threadCacheAccesses.get();
+            growHits = s.threadCacheHits.get();
+            growFinalSize = s.threadLocalCache.get().size();
+        } catch (Exception e) {
+            throw new RuntimeException("Grow phase failed", e);
+        }
+    
+        long growEnd = System.nanoTime();
+    
+        // Step 3: SHRINK phase (sparse access across large key range)
+        int shrinkAccesses = 0;
+        int shrinkHits = 0;
+        int shrinkFinalSize = 0;
+        long shrinkStart = System.nanoTime();
+    
+        try (MVStore s = new MVStore.Builder()
+                .fileName(fileName)
+                .autoCommitDisabled()
+                .compress().cacheSize(16).open()) {
+            s.setReuseSpace(false);
+            MVMap<Integer, String> map = s.openMap("adaptive");
+    
+            for (int round = 0; round < 50; round++) {
+                for (int i = 0; i < 2000; i++) {
+                    map.get((i * 31 + round * 101) % 5000);  // wider range = fewer hits
+                }
+                Thread.sleep(10);
+            }
+    
+            shrinkAccesses = s.threadCacheAccesses.get();
+            shrinkHits = s.threadCacheHits.get();
+            shrinkFinalSize = s.threadLocalCache.get().size();
+        } catch (Exception e) {
+            throw new RuntimeException("Shrink phase failed", e);
+        }
+    
+        long shrinkEnd = System.nanoTime();
+    
+        // Print results
+        System.out.println("[ADAPTIVE SCALING - GROW PHASE]");
+        System.out.printf("Accesses: %d | Hits: %d | HitRate: %.2f%% | FinalCacheSize: %d\n",
+                growAccesses, growHits, (100.0 * growHits / growAccesses), growFinalSize);
+    
+        System.out.println("[ADAPTIVE SCALING - SHRINK PHASE]");
+        System.out.printf("Accesses: %d | Hits: %d | HitRate: %.2f%% | FinalCacheSize: %d\n",
+                shrinkAccesses, shrinkHits, (100.0 * shrinkHits / shrinkAccesses), shrinkFinalSize);
+    
+        System.out.printf("Total time: %d ms\n",
+                (shrinkEnd - growStart) / 1_000_000);
+    }
+    
+    private void testAdaptiveShrinking() {
+        String fileName = getBaseDir() + "/" + getTestName();
+        FileUtils.delete(fileName);
+    
+        // Create the store and load it with pages
+        try (MVStore s = new MVStore.Builder().
+                fileName(fileName).
+                autoCommitDisabled().
+                compress().open()) {
+            MVMap<Integer, String> map = s.openMap("adaptive");
+            for (int i = 0; i < 5000; i++) {
+                map.put(i, new String(new char[1024])); // 1KB values
+            }
+            s.commit();
+        }
+    
+        // Reopen with sparse access pattern to simulate cold access (should trigger shrinking)
+        try (MVStore s = new MVStore.Builder().
+                fileName(fileName).
+                autoCommitDisabled().
+                compress().cacheSize(16).open()) {
+            s.setReuseSpace(false);
+            MVMap<Integer, String> map = s.openMap("adaptive");
+            long start = System.nanoTime();
+    
+            // Simulate low locality access pattern
+            for (int round = 0; round < 50; round++) {
+                for (int i = 0; i < 2000; i++) {
+                    map.get((i * 173) % 5000);  // wide jumps → fewer cache hits
+                }
+                try {
+                    Thread.sleep(10);
+                } catch (InterruptedException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+    
+            long end = System.nanoTime();
+            int finalSize = s.threadLocalCache.get().size();
+            int accesses = s.threadCacheAccesses.get();
+            int hits = s.threadCacheHits.get();
+            double hitRate = accesses > 0 ? (100.0 * hits / accesses) : 0.0;
+            long durationMs = (end - start) / 1_000_000;
+    
+            System.out.printf("[ADAPTIVE SHRINKING] Time: %d ms | Accesses: %d | Hits: %d | HitRate: %.2f%% | FinalCacheSize: %d\n",
+                    durationMs, accesses, hits, hitRate, finalSize);
+        }
+    }
 
     private void testKeyValueClasses() {
         String fileName = getBaseDir() + "/" + getTestName();
