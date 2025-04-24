@@ -1,0 +1,10 @@
+Here, we outline the code modifications made for this assignment. Our Github repo: https://github.com/TinaChandwani/ADS-Enhancing-H2-for-Modern-Workloads/tree/main
+
+For our implementation, the changes were in the following files:
+h2/src/main/org/h2/mvstore/MVStore.java, FileStore.java, AdaptiveLRUCache.java, and ThreadLocalCacheMode.java
+In the former two files, our edits are marked with a "P2 EDIT" comment. The latter two files we created.
+
+For our benchmarking, the changes were in the following file:
+h2/src/test/org/h2/test/TestMVStore.java
+testCacheSize was a pre-existing test that we slightly modified for our use case.
+We wrote testMixedWorkload, testMultiThreadedRead, and testAdaptiveScaling.

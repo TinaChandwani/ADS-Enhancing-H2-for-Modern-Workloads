@@ -91,7 +91,7 @@ public class TestMVStore extends TestBase {
         testRenameMapRollback();
         testCustomMapType();
         */
-        // testCacheSize();
+        testCacheSize();
         /*
         testConcurrentOpen();
         testFileHeader();
@@ -119,8 +119,8 @@ public class TestMVStore extends TestBase {
         testReuseSpace();
         testRandom();
         */
-        // testMixedWorkload();
-        // testMultiThreadedRead();
+        testMixedWorkload();
+        testMultiThreadedRead();
         testAdaptiveScaling();
         // testAdaptiveScalingGrowThenShrink();
         // testAdaptiveShrinking();
@@ -1966,61 +1966,11 @@ public class TestMVStore extends TestBase {
         );
     }
 
-    /*private void testMixedWorkload() {
-        String fileName = getBaseDir() + "/" + getTestName();
-        FileUtils.delete(fileName);
-    
-        long startTime = System.nanoTime();
-        int accesses = 0;
-        int hits = 0;
-        int finalCacheSize = 0;
-    
-        try (MVStore s = openStore(fileName)) {
-            MVMap<Integer, String> map = s.openMap("data");
-            s.preloadTargetMap = map;
-    
-            Random rand = new Random(42);
-            int totalOps = 20000;
-            int maxKey = 3000;
-    
-            for (int i = 0; i < totalOps; i++) {
-                int key = rand.nextInt(maxKey);
-                int op = rand.nextInt(100);
-                if (op < 60) { // 60% reads
-                    String value = map.get(key);
-                    if (value == null && rand.nextBoolean()) {
-                        map.put(key, "init" + key); // occasionally initialize if null
-                    }
-                } else if (op < 90) { // 30% writes
-                    map.put(key, "val" + rand.nextInt());
-                } else { // 10% deletes
-                    map.remove(key);
-                }
-            }
-    
-            accesses = s.threadCacheAccesses.get();
-            hits = s.threadCacheHits.get();
-            finalCacheSize = s.threadLocalCache.get().size();
-            s.threadLocalCache.remove();
-        }
-    
-        long endTime = System.nanoTime();
-        long durationMs = (endTime - startTime) / 1_000_000;
-        double hitRate = accesses > 0 ? (100.0 * hits / accesses) : 0.0;
-        String mode = MVStore.CACHE_MODE.name();
-        String warm = MVStore.USE_WARM_CACHE ? "Warm" : "Cold";
-    
-        System.out.printf(
-            "[%s | %s] Time: %d ms | Accesses: %d | Hits: %d | HitRate: %.2f%% | FinalCacheSize: %d\n",
-            mode, warm, durationMs, accesses, hits, hitRate, finalCacheSize
-        );
-    }*/
-
     private void testMixedWorkload() {
         String fileName = getBaseDir() + "/" + getTestName();
         FileUtils.delete(fileName);
     
-        // ----------- Phase 1: Write -----------
+        // Phase 1: Write
         try (MVStore s = openStore(fileName)) {
             MVMap<Integer, String> map = s.openMap("data");
             Random rand = new Random(42);
@@ -2031,7 +1981,7 @@ public class TestMVStore extends TestBase {
             s.commit();
         }
     
-        // ----------- Phase 2: Read & mutate -----------
+        // Phase 2: Read & mutate
         long startTime = System.nanoTime();
         int accesses = 0;
         int hits = 0;
@@ -2075,7 +2025,7 @@ public class TestMVStore extends TestBase {
         String fileName = getBaseDir() + "/" + getTestName();
         FileUtils.delete(fileName);
     
-        // -------- Phase 1: Write some data --------
+        // Phase 1: Write
         MVStore s = openStore(fileName);
         MVMap<Integer, String> sharedMap = s.openMap("data");
     
@@ -2085,7 +2035,7 @@ public class TestMVStore extends TestBase {
         s.commit();
         s.preloadTargetMap = sharedMap;
 
-        // -------- Phase 2: Multithreaded reads --------
+        // Phase 2: Multithreaded reads
         final int threadCount = 4;
         final int readsPerThread = 5000;
         ExecutorService executor = Executors.newFixedThreadPool(threadCount);

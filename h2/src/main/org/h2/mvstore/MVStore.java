@@ -194,7 +194,7 @@ public final class MVStore implements AutoCloseable {
 
     /** 
      * Thread-local cache and assocaited state for frequently accessed pages, one per thread
-     * P2 EDIT
+     * P2 EDIT BEGIN
      */
     public static final PrintWriter cacheLogWriter;
 
@@ -230,7 +230,7 @@ public final class MVStore implements AutoCloseable {
     public static final int ADAPTIVE_CACHE_MAX_SIZE = THREAD_LOCAL_CACHE_MAX_SIZE * 2;
     public static final int ADAPTIVE_CACHE_INITIAL_SIZE = THREAD_LOCAL_CACHE_MAX_SIZE * 3 / 4;
 
-    public static final boolean USE_THREAD_LOCAL_CACHE = true;
+    public static final boolean USE_THREAD_LOCAL_CACHE = false;
 
     public final ThreadLocal<Boolean> preloadPerformed = ThreadLocal.withInitial(() -> false);
 
@@ -281,6 +281,7 @@ public final class MVStore implements AutoCloseable {
             }
         }
     }    
+    // P2 EDIT END
     
     /**
      * The compression level for new pages (0 for disabled, 1 for fast, 2 for

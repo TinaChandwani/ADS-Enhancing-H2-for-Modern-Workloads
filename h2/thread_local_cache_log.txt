@@ -21,3 +21,63 @@ Thread 1 - Cache grew to 208 (hitRate: 91.41%)
 Thread 1 - Cache grew to 224 (hitRate: 91.41%)
 Thread 1 - Cache grew to 240 (hitRate: 91.21%)
 Thread 1 - Cache grew to 256 (hitRate: 91.21%)
+Thread 1 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
+Thread 21 initialized thread-local cache.
+Thread 22 initialized thread-local cache.
+Thread 24 initialized thread-local cache.
+Thread 23 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
+Thread 1 - Cache grew to 112 (hitRate: 90.43%)
+Thread 1 - Cache grew to 128 (hitRate: 91.41%)
+Thread 1 - Cache grew to 144 (hitRate: 91.21%)
+Thread 1 - Cache grew to 160 (hitRate: 91.41%)
+Thread 1 - Cache grew to 176 (hitRate: 91.41%)
+Thread 1 - Cache grew to 192 (hitRate: 91.21%)
+Thread 1 - Cache grew to 208 (hitRate: 91.41%)
+Thread 1 - Cache grew to 224 (hitRate: 91.41%)
+Thread 1 - Cache grew to 240 (hitRate: 91.21%)
+Thread 1 - Cache grew to 256 (hitRate: 91.21%)
+Thread 1 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
+Thread 1 initialized thread-local cache.
